@@ -1,0 +1,6 @@
+
+# @TODO: add comments
+Fabric==1.10.2
+virtualenvwrapper==4.7.0
+python-redmine==1.2.0
+python-dateutil==2.4.2

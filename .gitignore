@@ -1,0 +1,6 @@
+*.pyc
+staging/fabric.py
+production/fabric.py
+
+private/
+.ropeproject/
