@@ -12,7 +12,7 @@ Goal: implement a helper tool for interacting with redmine API
     http://www.redmine.org/projects/redmine/wiki/Rest_Versions
     https://dateutil.readthedocs.org/en/latest/examples.html
 
-@see app/models/issue_query.rb for how to filter issues
+@see Redmine ruby code in app/models/issue_query.rb for how to filter issues
 """
 
 import os
@@ -36,15 +36,33 @@ from dateutil.relativedelta import relativedelta
 
 import redmine
 
+"""
+select * from trackers;
++----+-------------+-------------+----------+---------------+-------------+
+| id | name        | is_in_chlog | position | is_in_roadmap | fields_bits |
++----+-------------+-------------+----------+---------------+-------------+
+|  1 | Bug         |           1 |        2 |             0 |           0 |
+|  2 | Story       |           1 |        1 |             1 |           0 |
+|  3 | Support     |           0 |        3 |             0 |           0 |
+|  7 | Task        |           0 |        4 |             1 |           0 |
+| 10 | Placeholder |           0 |        5 |             1 |           0 |
+| 11 | Enhancement |           0 |        6 |             1 |           0 |
++----+-------------+-------------+----------+---------------+-------------+
+6 rows in set (0.00 sec)
 
+@TODO: if servers have non-matching mapping for tracker IDs then
+it might be necessary to move the below constants to the fabric.py config file.
+"""
 TRACKER_BUG = 1
 TRACKER_STORY = 2
 TRACKER_TASK = 7
 TRACKER_PLACEHOLDER = 10
 TRACKER_ENHANCEMENT = 11
-TASK_STATUS_NEW = 1
+
+ISSUE_STATUS_NEW = 1
 CREATED_BY = 'created by "redman" tool'
 
+# the redmine connector instance
 INSTANCE = None
 
 
@@ -124,12 +142,21 @@ def copy_sprint(sprint_name):
     logger.info("Sprint [{}] was saved with id [{}]"
                 .format(new_sprint.name, new_sprint.id))
 
+    dividers = copy_dividers(old_sprint.id,
+                             new_sprint,
+                             start_date,
+                             end_date)
+
+    logger.info(
+        colors.green("\nCopied [{}] dividers from sprint {} to sprint {}."
+                     .format(len(dividers), old_sprint.id, new_sprint.id)))
+
     stories, tasks = copy_stories(old_sprint.id,
                                   new_sprint,
                                   start_date,
                                   end_date)
     logger.info(
-        colors.green("\nSuccess. Copied [{}] stories and [{}] tasks "
+        colors.green("\nCopied [{}] stories and [{}] tasks "
                      "from sprint {} to sprint {}."
                      .format(len(stories), len(tasks),
                              old_sprint.id, new_sprint.id)))
@@ -240,7 +267,7 @@ def create_story(story, new_sprint, start_date, end_date):
             subject=story.subject,
             tracker_id=TRACKER_STORY,
             description=CREATED_BY,
-            status_id=TASK_STATUS_NEW,
+            status_id=ISSUE_STATUS_NEW,
             priority_id=1,
             # assigned_to_id=
             start_date=start_date,
@@ -281,7 +308,7 @@ def create_story_tasks(story, new_story, start_date, end_date):
                 subject=taskk.subject,
                 tracker_id=TRACKER_TASK,
                 description=CREATED_BY,
-                status_id=TASK_STATUS_NEW,
+                status_id=ISSUE_STATUS_NEW,
                 priority_id=2,
                 fixed_version_id=new_story.fixed_version.id,
                 is_private=False,
@@ -307,23 +334,23 @@ def copy_stories(old_sprint_id, new_sprint, start_date, end_date,
     """
     Copy stories form `old_sprint_id` to `new_sprint_id`.
     If `for_project` argument is specified then copy only the stories
-    associeated with it.
+    associated with it.
 
     :old_sprint_id:
     :new_sprint_id:
-    :start_date:
-    :end_date:
-    :for_project:
+    :start_date: new sprint start date
+    :end_date: new sprint end date
+    :for_project: optional name of the project for which to copy the stories
     """
     if for_project is not None:
         stories = get_client_instance().issue.filter(
             project_id=for_project,
-            status_id=TASK_STATUS_NEW,
+            status_id=ISSUE_STATUS_NEW,
             tracker_id=TRACKER_STORY,
             fixed_version_id=old_sprint_id)
     else:
         stories = get_client_instance().issue.filter(
-            status_id=TASK_STATUS_NEW,
+            status_id=ISSUE_STATUS_NEW,
             tracker_id=TRACKER_STORY,
             fixed_version_id=old_sprint_id)
 
@@ -343,3 +370,30 @@ def copy_stories(old_sprint_id, new_sprint, start_date, end_date,
         new_tasks.extend(new_tasks)
 
     return (new_stories, new_tasks)
+
+
+def copy_dividers(old_sprint_id, new_sprint, start_date, end_date):
+    """
+    Copy dividers (aka placeholders) form `old_sprint_id` to `new_sprint_id`.
+    Note: Redmine API dows not support filters in which more than one
+    `tracker_id` is specified therefore we have a special function for dividers
+
+    :old_sprint_id:
+    :new_sprint_id:
+    :start_date: new sprint start date
+    :end_date: new sprint end date
+    """
+    dividers = get_client_instance().issue.filter(
+        status_id=ISSUE_STATUS_NEW,
+        tracker_id=TRACKER_PLACEHOLDER,
+        fixed_version_id=old_sprint_id)
+
+    new_divs = []
+
+    for div in dividers:
+        logger.info("\n==> Copying divider [{}] for project [{}]"
+                    .format(div.subject, div.project.name))
+        new_div = create_story(div, new_sprint, start_date, end_date)
+        new_divs.append(new_div)
+
+    return new_divs
