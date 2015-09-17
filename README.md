@@ -32,6 +32,7 @@ cp sample.fabric.py production/fabric.py
 </pre>
 
 - Run the redman tool:
+
 <pre>
 fab production copy_sprint_template_green
 or
