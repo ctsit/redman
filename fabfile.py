@@ -194,6 +194,13 @@ def get_sprint_from_name(name):
     return spr
 
 
+def delete_existing_sprint(sprint):
+    """@TODO: delete stories and tasks before deleting the sprint"""
+    if sprint is not None:
+        print(colors.red("Deleting sprint [{}]".format(sprint.name)))
+        get_client_instance().version.delete(sprint.id)
+
+
 def create_sprint(template_sprint_name, start_date, end_date):
     """
     Create a sprint with a specified name.
@@ -205,10 +212,7 @@ def create_sprint(template_sprint_name, start_date, end_date):
     new_sprint_name = get_long_sprint_name(template_sprint_name,
                                            start_date, end_date)
     sprint = get_sprint_from_name(new_sprint_name)
-
-    if sprint is not None:
-        get_client_instance().version.delete(sprint.id)
-        print(colors.red("Sprint [{}] already exists".format(new_sprint_name)))
+    delete_existing_sprint(sprint)
 
     try:
         sprint = get_client_instance().version.create(
@@ -332,7 +336,7 @@ def create_story_tasks(story, new_story, start_date, end_date):
 def copy_stories(old_sprint_id, new_sprint, start_date, end_date,
                  for_project=None):
     """
-    Copy stories form `old_sprint_id` to `new_sprint_id`.
+    Copy stories with any status form `old_sprint_id` to `new_sprint_id`.
     If `for_project` argument is specified then copy only the stories
     associated with it.
 
@@ -345,12 +349,10 @@ def copy_stories(old_sprint_id, new_sprint, start_date, end_date,
     if for_project is not None:
         stories = get_client_instance().issue.filter(
             project_id=for_project,
-            status_id=ISSUE_STATUS_NEW,
             tracker_id=TRACKER_STORY,
             fixed_version_id=old_sprint_id)
     else:
         stories = get_client_instance().issue.filter(
-            status_id=ISSUE_STATUS_NEW,
             tracker_id=TRACKER_STORY,
             fixed_version_id=old_sprint_id)
 
