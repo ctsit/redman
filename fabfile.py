@@ -26,15 +26,19 @@ logger.addHandler(logging.StreamHandler(sys.stdout))
 logger.setLevel(logging.INFO)
 
 from fabric.api import local, task, env
-from fabric import colors
 from fabric.utils import abort
 from fabric.operations import require
 
+# from datetime import date, datetime
+import time
 from datetime import date
+from dateutil.parser import parse
 from dateutil.rrule import WE, TH
 from dateutil.relativedelta import relativedelta
 
+from mailer import Mailer, Message
 import redmine
+
 
 """
 select * from trackers;
@@ -53,11 +57,19 @@ select * from trackers;
 @TODO: if servers have non-matching mapping for tracker IDs then
 it might be necessary to move the below constants to the fabric.py config file.
 """
-TRACKER_BUG = 1
-TRACKER_STORY = 2
-TRACKER_TASK = 7
-TRACKER_PLACEHOLDER = 10
-TRACKER_ENHANCEMENT = 11
+TRACKER_BUG = 'bug'
+TRACKER_STORY = 'story'
+TRACKER_TASK = 'task'
+TRACKER_PLACEHOLDER = 'placeholder'
+TRACKER_ENHANCEMENT = 'enhancement'
+
+TRACKERS = {
+    TRACKER_BUG: 1,
+    TRACKER_STORY: 2,
+    TRACKER_TASK: 7,
+    TRACKER_PLACEHOLDER: 10,
+    TRACKER_ENHANCEMENT: 11
+}
 
 ISSUE_STATUS_NEW = 1
 CREATED_BY = 'created by "redman" tool'
@@ -107,36 +119,80 @@ def list_projects():
 
 
 @task
-def copy_sprint_template_brown():
+def copy_sprint_template_brown(is_dry_run=True):
     require('environment', provided_by=[production, staging])
-    copy_sprint(env.sprint_name_brown)
+    copy_sprint(env.sprint_name_brown, env.start_date, env.repeat_after,
+                is_dry_run)
 
 
 @task
-def copy_sprint_template_green():
+def copy_sprint_template_green(is_dry_run=True):
     require('environment', provided_by=[production, staging])
-    copy_sprint(env.sprint_name_green)
+    copy_sprint(env.sprint_name_green, env.start_date, env.repeat_after,
+                is_dry_run)
 
 
 @task
-def copy_sprint_template_misc():
+def copy_sprint_template_misc(is_dry_run=True):
     require('environment', provided_by=[production, staging])
-    copy_sprint(env.sprint_name_misc)
+    copy_sprint(env.sprint_name_misc, env.start_date, env.repeat_after,
+                is_dry_run)
 
 
-def copy_sprint(sprint_name):
+def needs_to_run(date_ref, date_test, repeat_after):
+    """
+    :param date_ref: the day we enabled the cron (used as a reference)
+    :param date_test: usually this is today's date
+    :param repeat_after: after how many days the cron needs to re-run
+
+    @return true if we are in on the day when the cron job needs to run
+    """
+    needs = False
+
+    if date_ref is not None \
+            and date_test is not None \
+            and repeat_after is not None:
+        diff = date_test - date_ref
+
+        # logger.info("Diff days: {}".format(diff))
+
+        if 0 == (diff.days % repeat_after):
+            needs = True
+
+    return needs
+
+
+def copy_sprint(sprint_name, cron_start_date, cron_repeat_after, is_dry_run):
     """
     :param sprint_name: string representing the template name to be copied
+    :param cron_start_date: date used to decide if cron needs to be skipped/run
+    :param cron_repeat_after: after how many days the cron needs to re-run
     """
+    date_ref = date.today()
+    # date_ref = date.fromtimestamp(time.time())
+    cron_start_date = parse(cron_start_date).date()
+
+    if not needs_to_run(cron_start_date, date_ref, cron_repeat_after):
+        diff = date_ref - cron_start_date
+        abort("No need to run since days passed {} != {} days "
+              "specified in the configuration"
+              .format(diff.days, cron_repeat_after))
+
     # sanity check
     old_sprint = get_sprint_from_name(sprint_name)
 
     if old_sprint is None:
-        abort(colors.red("Sprint [{}] does not exist. Please check the name."
-                         .format(sprint_name)))
+        abort("Sprint [{}] does not exist. Please check the name."
+              .format(sprint_name))
 
-    date_ref = date.today()
     start_date, end_date = get_sprint_dates(date_ref)
+
+    if type(is_dry_run) != bool:
+        is_dry_run = is_dry_run.lower() in ['t', 'true', '1']
+
+    if is_dry_run:
+        abort("Dry-run mode. In real mode will create a sprint "
+              "for dates {} to {}".format(start_date, end_date))
 
     new_sprint = create_sprint(sprint_name, start_date, end_date)
     logger.info("Sprint [{}] was saved with id [{}]"
@@ -147,19 +203,30 @@ def copy_sprint(sprint_name):
                              start_date,
                              end_date)
 
-    logger.info(
-        colors.green("\nCopied [{}] dividers from sprint {} to sprint {}."
-                     .format(len(dividers), old_sprint.id, new_sprint.id)))
-
     stories, tasks = copy_stories(old_sprint.id,
                                   new_sprint,
                                   start_date,
                                   end_date)
-    logger.info(
-        colors.green("\nCopied [{}] stories and [{}] tasks "
-                     "from sprint {} to sprint {}."
-                     .format(len(stories), len(tasks),
-                             old_sprint.id, new_sprint.id)))
+
+    msg_divs = "\nCopied [{}] dividers".format(len(dividers))
+    msg_tasks = "\nCopied [{}] stories and [{}] tasks "\
+        .format(len(stories), len(tasks))
+    logger.info(msg_divs)
+    logger.info(msg_tasks)
+
+    email_props = EmailProps(
+        env.email_sender,
+        env.email_recipient,
+        env.email_subject,
+        env.email_server)
+
+    issues = []
+    issues.extend(dividers)
+    issues.extend(stories)
+    issues.extend(tasks)
+
+    content = format_content(old_sprint, new_sprint, issues, env.api_url)
+    send_summary(email_props, content)
 
 
 def load_environ(target, new_settings={}):
@@ -194,11 +261,31 @@ def get_sprint_from_name(name):
     return spr
 
 
-def delete_existing_sprint(sprint):
-    """@TODO: delete stories and tasks before deleting the sprint"""
+def delete_sprint(sprint):
+    """Delete stories and tasks for the specified sprint"""
+    deleted_stories = []
+    deleted_tasks = []
+
     if sprint is not None:
-        print(colors.red("Deleting sprint [{}]".format(sprint.name)))
+        logger.info("Deleting sprint [{}]: {}"
+                    .format(sprint.id, sprint.name))
+        stories = get_client_instance().issue.filter(
+            tracker_id=TRACKERS[TRACKER_STORY],
+            fixed_version_id=sprint.id)
+
+        for story in stories:
+            for taskk in story.children:
+                logger.info("Deleting: {}".format(to_string(taskk)))
+                get_client_instance().issue.delete(taskk.id)
+                deleted_tasks.append(taskk)
+
+            logger.info("Deleting: {}".format(to_string(story)))
+            get_client_instance().issue.delete(story.id)
+            deleted_stories.append(story)
+
+        # finally delete the sprint
         get_client_instance().version.delete(sprint.id)
+    return (deleted_stories, deleted_tasks)
 
 
 def create_sprint(template_sprint_name, start_date, end_date):
@@ -212,7 +299,8 @@ def create_sprint(template_sprint_name, start_date, end_date):
     new_sprint_name = get_long_sprint_name(template_sprint_name,
                                            start_date, end_date)
     sprint = get_sprint_from_name(new_sprint_name)
-    delete_existing_sprint(sprint)
+    delete_sprint(sprint)
+    time.sleep(1)
 
     try:
         sprint = get_client_instance().version.create(
@@ -224,7 +312,7 @@ def create_sprint(template_sprint_name, start_date, end_date):
             sprint_start_date=start_date,
             effective_date=end_date)
     except Exception as exc:
-        abort(colors.red("Unable to save sprint due: ".format(exc)))
+        abort("Unable to save sprint due: ".format(exc))
 
     return sprint
 
@@ -262,14 +350,14 @@ def create_story(story, new_sprint, start_date, end_date):
     Called from copy_stories()
     @see create_sprint()
     """
-    logger.debug("using sprint: {} {}"
-                 .format(new_sprint.id, new_sprint.created_on,
-                         new_sprint.due_date))
+    logger.info("using sprint: {} {}"
+                .format(new_sprint.id, new_sprint.created_on,
+                        new_sprint.due_date))
     try:
         new_story = get_client_instance().issue.create(
             project_id=story.project.id,
             subject=story.subject,
-            tracker_id=TRACKER_STORY,
+            tracker_id=TRACKERS[TRACKER_STORY],
             description=CREATED_BY,
             status_id=ISSUE_STATUS_NEW,
             priority_id=1,
@@ -278,22 +366,10 @@ def create_story(story, new_sprint, start_date, end_date):
             due_date=end_date,
             fixed_version_id=new_sprint.id)
     except Exception as exc:
-        abort(colors.red("Unable to save story [{}] due:"
-                         .format(story.id, exc)))
+        abort("Unable to save story [{}] due:".format(story.id, exc))
 
+    logger.debug("Created story: {}".format(story.subject))
     return new_story
-
-
-def print_task(task):
-    """Helper for debugging task attributes"""
-    text = "  Task #{}: {}".format(task.id, task.subject)
-
-    if hasattr(task, 'assigned_to'):
-        text += ', assigned: {}'.format(task.assigned_to.name)
-    if hasattr(task, 'estimated_hours'):
-        text += ', estimated_hours: {}'.format(task.estimated_hours)
-
-    return text
 
 
 def create_story_tasks(story, new_story, start_date, end_date):
@@ -304,13 +380,13 @@ def create_story_tasks(story, new_story, start_date, end_date):
 
     for task_stub in story.children:
         taskk = get_client_instance().issue.get(task_stub.id)
-        logger.info(print_task(taskk))
+        logger.info(to_string(taskk))
 
         try:
             new_task = get_client_instance().issue.create(
                 project_id=story.project.id,
                 subject=taskk.subject,
-                tracker_id=TRACKER_TASK,
+                tracker_id=TRACKERS[TRACKER_TASK],
                 description=CREATED_BY,
                 status_id=ISSUE_STATUS_NEW,
                 priority_id=2,
@@ -328,8 +404,8 @@ def create_story_tasks(story, new_story, start_date, end_date):
             )
             new_tasks.append(new_task)
         except Exception as exc:
-            abort(colors.red("Unable to save task [{}] due:"
-                             .format(taskk.id, exc)))
+            abort("Unable to save task [{}] due:"
+                  .format(taskk.id, exc))
     return new_tasks
 
 
@@ -349,11 +425,11 @@ def copy_stories(old_sprint_id, new_sprint, start_date, end_date,
     if for_project is not None:
         stories = get_client_instance().issue.filter(
             project_id=for_project,
-            tracker_id=TRACKER_STORY,
+            tracker_id=TRACKERS[TRACKER_STORY],
             fixed_version_id=old_sprint_id)
     else:
         stories = get_client_instance().issue.filter(
-            tracker_id=TRACKER_STORY,
+            tracker_id=TRACKERS[TRACKER_STORY],
             fixed_version_id=old_sprint_id)
 
     new_stories = []
@@ -387,7 +463,7 @@ def copy_dividers(old_sprint_id, new_sprint, start_date, end_date):
     """
     dividers = get_client_instance().issue.filter(
         status_id=ISSUE_STATUS_NEW,
-        tracker_id=TRACKER_PLACEHOLDER,
+        tracker_id=TRACKERS[TRACKER_PLACEHOLDER],
         fixed_version_id=old_sprint_id)
 
     new_divs = []
@@ -399,3 +475,85 @@ def copy_dividers(old_sprint_id, new_sprint, start_date, end_date):
         new_divs.append(new_div)
 
     return new_divs
+
+
+def to_string(issue):
+    """Helper for debugging issue attributes"""
+    # Translate an issue id into a name
+    issue_type = next((k for k, v in TRACKERS.items()
+                       if v == issue.tracker.id), 'issue')
+    text = "  {} #{}: {}".format(issue_type, issue.id, issue.subject)
+
+    if hasattr(issue, 'assigned_to'):
+        text += ', assigned: {}'.format(issue.assigned_to.name)
+    if hasattr(issue, 'estimated_hours'):
+        text += ', estimated_hours: {}'.format(issue.estimated_hours)
+
+    return text
+
+
+class EmailProps(object):
+    """ Data storage object"""
+
+    def __init__(self, email_sender, email_recipient,
+                 email_subject, email_server):
+        """constuctor"""
+        self.email_sender = email_sender
+        self.email_recipient = email_recipient
+        self.email_subject = email_subject
+        self.email_server = email_server
+
+
+def format_content(old_sprint, new_sprint, issues, api_url):
+    url_old = '<a href="{}/versions/{}">{}</a>'\
+        .format(api_url, old_sprint.id, old_sprint.name)
+    url_new = '<a href="{}/versions/{}">{}</a>'\
+        .format(api_url, new_sprint.id, new_sprint.name)
+
+    how = "List of issues copied from sprint {} to sprint {}"\
+        .format(url_old, url_new)
+    what = "<li>" + "<li>".join([to_string(issue) for issue in issues])
+
+    html = """
+    <p>
+    Hello Team,
+    <br />
+    This email serves a notification about the "sprint template copy" job
+    being completed by the
+    <a href="https://github.com/indera/redman">redman&#8482;</a>.
+    </p>
+    <p> {} </p>
+    <ul> {} </ul>
+    """.format(how, what)
+    return html
+
+
+def send_summary(props, content):
+    """Helper for building the email body"""
+    email = """
+    <html>
+    {}
+    <hr />
+    Have a great day!
+    </html>
+    """.format(content)
+    send_email(props, email)
+
+
+def send_email(email_props, content):
+    """ Helper for sending emails"""
+    p = email_props
+    mess = Message(charset="utf-8")
+    mess.From = p.email_sender
+    mess.To = p.email_recipient
+    mess.Subject = p.email_subject
+    mess.Html = content
+    mess.Body = "Please enable HTML in your client to view this message."
+    sender = Mailer(p.email_server)
+
+    try:
+        sender.send(mess)
+        logger.info("Email [{}] was sent to: {}".format(mess.Subject, mess.To))
+    except Exception as exc:
+        logger.error("Problem sending email [{}] to [{}]: {}"
+                     .format(p.email_subject, p.email_recipient, exc))
