@@ -1,0 +1,15 @@
+#!/bin/bash
+# This script is safe to be scheduled to run daily
+
+# Notes about the cron scheduling:
+#   - you have to create the log folder: mkdir -p $HOME/crons/log/
+#   - to ignore output add the following suffix to your command:  >/dev/null 2&>1
+#   - to check if the cron executed: cat /var/log/syslog
+
+# crontab -e
+# * * * * * /root/.virtualenvs/redman/bin/python -c 'from datetime import datetime; print datetime.today()' >> $HOME/crons/log/cron.log 2&>1
+# 59 15 * * * $HOME/crons/redman/run_cron >> $HOME/crons/log/cron.log 2&>1
+
+pushd $HOME/crons/redman/
+    /root/.virtualenvs/redman/bin/fab staging copy_sprint_template_green:is_dry_run=False
+popd
