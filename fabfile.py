@@ -174,8 +174,8 @@ def copy_sprint(sprint_name, cron_start_date, cron_repeat_after, is_dry_run):
 
     if not needs_to_run(cron_start_date, date_ref, cron_repeat_after):
         diff = date_ref - cron_start_date
-        abort("No need to run since days passed {} != {} days "
-              "specified in the configuration"
+        abort("No need to copy the sprint since days passed [{}] is not a "
+              " multiple of [{}] specified in the `fabric.py` config file."
               .format(diff.days, cron_repeat_after))
 
     # sanity check
