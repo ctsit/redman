@@ -21,8 +21,13 @@ import imp
 import os.path
 import logging
 logging.captureWarnings(True)
+
+# Add timestamps to the log
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.StreamHandler(sys.stdout))
+handler = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
 from fabric.api import local, task, env
