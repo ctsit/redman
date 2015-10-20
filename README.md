@@ -13,15 +13,21 @@ The target user-base for the redman tool is anybody using
 
 The redman tool is compatible with python 2.7 so please create a virtual
 environment for python 2.7 if your computer setup uses python 3 by default.
-
 For more instructions on how to use virtual environments please got to
 [https://virtualenv.pypa.io/en/latest/](https://virtualenv.pypa.io/en/latest/).
 
-Please install the python requirements first:
+<pre>
+pip install virtualenv
+</pre>
+
+Create a virtual environmanet and activate it, then install the
+python requirements:
 
 <pre>
 git clone git@github.com:ctsit/redman.git
 cd redman
+virtualenv venv
+source venv/bin/activate
 pip install -r requirements.txt
 </pre>
 
@@ -55,6 +61,16 @@ fab production copy_sprint_template_green
 or
 make prod_green
 </pre>
+
+Note: If you receive an error like
+<pre>
+No need to copy the sprint since days passed [22] is not a multiple of [14]
+specified in the `fabric.py` config file.
+</pre>
+then please update the `repeat_after` parameter in the `production/fabric.py`
+config file to match the value `22`. The reason for this error is that
+redman is configured to be run automatically every `X` days from a specific date
+(in our case on day 14, 28, 42... and so on).
 
 
 # Screenshots
