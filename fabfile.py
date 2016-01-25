@@ -13,11 +13,14 @@ Goal: implement a helper tool for interacting with redmine API
     https://dateutil.readthedocs.org/en/latest/examples.html
 
 @see Redmine ruby code in app/models/issue_query.rb for how to filter issues
+
+TODO: use project_id=env.project_name instead of hardcoded 'admin_project'
 """
 
 import os
 import sys
 import imp
+import re
 import os.path
 import logging
 logging.captureWarnings(True)
@@ -34,7 +37,6 @@ from fabric.api import local, task, env
 from fabric.utils import abort
 from fabric.operations import require
 
-# from datetime import date, datetime
 import time
 from datetime import date
 from dateutil.parser import parse
@@ -105,7 +107,7 @@ def get_client_instance():
     """ Create an instance of the the object used
     to communicate with the redmine API"""
     require('environment', provided_by=[production, staging])
-    logger.debug("Using api_url: {}".format(env.api_url))
+    logger.info("Using api_url: {}".format(env.api_url))
     # logger.info("Using api_key: {}".format(env.api_key))
 
     global INSTANCE
@@ -197,7 +199,6 @@ def copy_sprint(sprint_name, cron_start_date, cron_repeat_after, is_dry_run):
     :param cron_repeat_after: after how many days the cron needs to re-run
     """
     date_ref = date.today()
-    # date_ref = date.fromtimestamp(time.time())
     cron_start_date = parse(cron_start_date).date()
 
     if not needs_to_run(cron_start_date, date_ref, cron_repeat_after):
@@ -219,8 +220,11 @@ def copy_sprint(sprint_name, cron_start_date, cron_repeat_after, is_dry_run):
         is_dry_run = is_dry_run.lower() in ['t', 'true', '1']
 
     if is_dry_run:
+        new_sprint_name = get_new_sprint_name(sprint_name,
+                                              start_date, end_date)
         abort("Dry-run mode. In real mode will create a sprint "
-              "for dates {} to {}".format(start_date, end_date))
+              "named [{}] for dates [{} to {}]"
+              .format(new_sprint_name, start_date, end_date))
 
     new_sprint = create_sprint(sprint_name, start_date, end_date)
     logger.info("Sprint [{}] was saved with id [{}]"
@@ -324,9 +328,8 @@ def create_sprint(template_sprint_name, start_date, end_date):
     :param template_sprint_name: string representing the template to be copied
     :return sprint: the new object
     """
-    # if is_existing_sprint(sprint_name):
-    new_sprint_name = get_long_sprint_name(template_sprint_name,
-                                           start_date, end_date)
+    new_sprint_name = get_new_sprint_name(template_sprint_name,
+                                          start_date, end_date)
     sprint = get_sprint_from_name(new_sprint_name)
     delete_sprint(sprint)
     time.sleep(1)
@@ -359,18 +362,93 @@ def get_sprint_dates(date_ref):
     return (sprint_start, sprint_end)
 
 
-def get_long_sprint_name(sprint_name, start_date, end_date):
+def get_template_color(template_name):
+    """
+    @return "Abc" from strings matching the pattern "template_sprint_abc"
+    """
+    m = re.match('(template_sprint_)([a-z].*)', template_name, re.IGNORECASE)
+    return m.group(2).title() if m is not None else None
+
+
+def find_newest_sprint_for_template(template_name):
+    """
+    Helper method for get_new_sprint_name().
+    If input is "TEMPLATE_SPRINT_GREEN" then the expected output is
+        {'color': 'Green', 'visible_id': 'the_number_in_name'}
+    @return dict
+    """
+    color = get_template_color(template_name)
+    visible_id = None
+    versions = get_versions()
+
+    if color is not None:
+        max_found = 0
+        max_name = ''
+
+        for ver in versions:
+            # check if "Green" is in the "Green Sprint xyz" string
+            if int(ver['id']) > max_found and color in ver['name']:
+                max_found = int(ver['id'])
+                max_name = ver['name']
+
+        # finally extract the "xyz" from the newest "Green Sprint xyz"
+        max_name = max_name.replace('  ', ' ').strip()
+        m = re.match('([a-z].*) (sprint) ([0-9].*)', max_name, re.IGNORECASE)
+        # print "found: {} from {}".format(m.group(3), max_name)
+        visible_id = m.group(3) if m is not None else None
+
+    data = {'color': color, 'visible_id': visible_id}
+    logger.info("For sprint [{}] found data: {}".format(template_name, data))
+    return data
+
+
+def increment(x):
+    """Increment a string representation of an integer
+    @return None if the input is not numeric
+    """
+    inc = None
+    # try:
+    #     inc = int(x) + 1
+    # except ValueError:
+    #     pass
+    if unicode(x).isnumeric():
+        inc = int(x) + 1
+    return inc
+
+
+def get_new_sprint_name(template_name, start_date, end_date):
     """
     Append the start and end dates to the sprint name.
 
-    :param sprint_name: string representing the template name to be copied
+    - add message: You can...
+    - runs at 4 every other monday
+    - make your changes using forge web interface
+
+    :param template_name: string representing the template name to be copied
+    :param newest_sprint: dictionary {'color': ... , 'visible_id': ...}
     :param date_start:
     :param date_end:
     """
-    d1 = start_date.strftime("%m%d%y")
-    d2 = end_date.strftime("%m%d%y")
-    name = sprint_name.replace(" ", "_")
-    name = "{}_{}_{}_to_{}".format("COPY", name, d1, d2)
+    name = None
+
+    newest_sprint = find_newest_sprint_for_template(template_name)
+
+    if newest_sprint['color'] is not None:
+        # adhere to the historical naming convention "Green Sprint 065"
+        incremented = increment(newest_sprint['visible_id'])
+        # zero fill: "65".zfill(3) ==> "065"
+        incremented = '{:0>3}'.format(incremented)
+        if incremented is not None:
+            name = "{} Sprint {}".format(newest_sprint['color'], incremented)
+
+    if name is None:
+        # last resort - include the dates in the name
+        logger.warn("The template name did not match the expected one...")
+        d1 = start_date.strftime("%m%d%y")
+        d2 = end_date.strftime("%m%d%y")
+        name = template_name.replace(" ", "_")
+        name = "{}_{}_{}_to_{}".format("COPY", name, d1, d2)
+
     return name
 
 

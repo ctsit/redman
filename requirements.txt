@@ -1,7 +1,8 @@
+Fabric==1.10.2              # used to run the job on different servers
+python-redmine==1.2.0       # used to interact with the redmine API
+python-dateutil==2.4.2      # used to compute dates easily
+mailer==0.8.1               # used for emailing a summary of the completed job
 
-# @TODO: add comments
-Fabric==1.10.2
-virtualenvwrapper==4.7.0
-python-redmine==1.2.0
-python-dateutil==2.4.2
-mailer==0.8.1
+# @TODO: move the following to dev.txt
+virtualenvwrapper==4.7.0    # used to manage virtualenvs
+mock==1.3.0                 # used for running the tests

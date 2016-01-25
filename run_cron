@@ -12,4 +12,6 @@
 
 pushd $HOME/crons/redman/
     /root/.virtualenvs/redman/bin/fab staging copy_sprint_template_green:is_dry_run=False
+    /root/.virtualenvs/redman/bin/fab production copy_sprint_template_misc:is_dry_run=False
+    /root/.virtualenvs/redman/bin/fab production copy_sprint_template_brown:is_dry_run=False
 popd
