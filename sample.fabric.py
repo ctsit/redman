@@ -13,6 +13,9 @@ def get_settings(overrides={}):
     """
     SETTINGS = {}
 
+    # The project under which all "Sprints" are created
+    SETTINGS['project_name'] = 'admin_project'
+
     # Cron settings
     SETTINGS['start_date'] = overrides.get('start_date', '2015-09-21')
     SETTINGS['repeat_after'] = overrides.get('repeat_after', 14)

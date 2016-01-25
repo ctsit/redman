@@ -11,25 +11,29 @@ The target user-base for the redman tool is anybody using
 
 # Setup
 
-The redman tool is compatible with python 2.7 so please create a virtual
+Currently there is no pip package for the redman tool, so please
+install python-dev packages before proceeding with the application installation.
+
+    sudo apt-get install python-dev
+
+
+The redman tool was tested with python 2.7 only. Please create a virtual
 environment for python 2.7 if your computer setup uses python 3 by default.
 For more instructions on how to use virtual environments please got to
 [https://virtualenv.pypa.io/en/latest/](https://virtualenv.pypa.io/en/latest/).
 
-<pre>
-pip install virtualenv
-</pre>
 
-Create a virtual environmanet and activate it, then install the
+    pip install virtualenv
+
+
+Create a virtual environment and activate it, then install the
 python requirements:
 
-<pre>
-git clone git@github.com:ctsit/redman.git
-cd redman
-virtualenv venv
-source venv/bin/activate
-pip install -r requirements.txt
-</pre>
+    git clone git@github.com:ctsit/redman.git
+    cd redman
+    virtualenv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
 
 
 # Usage
@@ -41,32 +45,28 @@ called `TEMPLATE_SPRINT_GREEN` and we will use it to run our tool.
 
 - Create the fabric.py file in which we configure the tool:
 
-<pre>
-cp sample.fabric.py production/fabric.py
-</pre>
+    cp sample.fabric.py production/fabric.py
+
 
 - Edit the production/fabric.py file lines which contain
 information about redmine:
 
-<pre>
-api_url: https://your_redmine_url.com
-api_key: some_long_string_you_can_get_from_my_account_page_under_api_access_key (see the screenshots section below)
-sprint_name_green: 'TEMPLATE_SPRINT_GREEN'
-</pre>
+    api_url: https://your_redmine_url.com
+    api_key: some_long_string_you_can_get_from_my_account_page_under_api_access_key (see the screenshots section below)
+    sprint_name_green: 'TEMPLATE_SPRINT_GREEN'
+
 
 - Run the redman tool:
 
-<pre>
-fab production copy_sprint_template_green
-or
-make prod_green
-</pre>
+    fab production copy_sprint_template_green
+    or
+    make prod_green
 
 Note: If you receive an error like
-<pre>
-No need to copy the sprint since days passed [22] is not a multiple of [14]
-specified in the `fabric.py` config file.
-</pre>
+
+    No need to copy the sprint since days passed [22] is not a multiple of [14]
+    specified in the `fabric.py` config file.
+
 then please update the `repeat_after` parameter in the `production/fabric.py`
 config file to match the value `22`. The reason for this error is that
 redman is configured to be run automatically every `X` days from a specific date
@@ -86,6 +86,6 @@ An example of session using the redman tool:
 
 # Contributors
 
-The application was written by Andrei Sura with tremendous support and fedback
+The application was written by Andrei Sura with tremendous support and feedback
 from the entire
 [CTS-IT team](https://www.ctsi.ufl.edu/research/study-development/informatics-consulting/).

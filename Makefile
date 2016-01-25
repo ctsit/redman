@@ -8,6 +8,8 @@ help:
 	@echo " prod_green           : copy green sprint template on production server"
 	@echo " prod_brown           : copy brown sprint template on production server"
 	@echo " prod_misc            : copy misc sprint template on production server"
+	@echo " stage_projects       : list the projects on staging server"
+	@echo " prod_projects        : list the projects on production server"
 	@echo
 
 
@@ -32,6 +34,10 @@ stage_projects:
 prod_projects:
 	fab production list_projects
 
+stage_versions:
+	fab staging list_versions
+prod_versions:
+	fab production list_versions
 
 activate:
 	. ~/.virtualenvs/redman/bin/activate

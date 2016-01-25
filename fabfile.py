@@ -77,7 +77,7 @@ TRACKERS = {
 }
 
 ISSUE_STATUS_NEW = 1
-CREATED_BY = 'created by "redman" tool'
+CREATED_BY = ''
 
 # the redmine connector instance
 INSTANCE = None
@@ -121,6 +121,29 @@ def list_projects():
     projects = get_client_instance().project.all()
     for idx, pro in enumerate(projects):
         print(" {}. {}".format(idx+1, pro.name))
+
+
+@task
+def list_versions():
+    """ List the versions in Redmine"""
+    versions = get_versions()
+    for idx, ver in enumerate(versions):
+        print(" {}. {}".format(idx+1, ver['name']))
+
+
+def get_versions():
+    """ Retrive all versions in Redmine"""
+    found = []
+
+    try:
+        versions = get_client_instance().version.filter(
+            project_id=env.project_name)
+        found = [{'id': ver.id, 'name': ver.name}
+                 for ver in versions]
+    except Exception:
+        pass
+
+    return found
 
 
 @task
@@ -261,7 +284,8 @@ def get_sprint_from_name(name):
             project_id="admin_project")
         found = [sprint for sprint in sprints if sprint.name == name]
         spr = found[0]
-    except Exception:
+    except Exception as exc:
+        logger.error("Exception in get_sprint_from_name(): {}".format(exc))
         pass
     return spr
 
